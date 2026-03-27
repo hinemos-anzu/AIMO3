@@ -1,6 +1,7 @@
 """Minimal evaluation pipeline.
 
 Day1 goal: deterministic, comparable baseline.
+Day2 addition: run_batch() for multi-record aggregation.
 Solver is a placeholder — returns "00000".
 """
 
@@ -47,4 +48,41 @@ def run_one(record: dict[str, Any]) -> dict[str, Any]:
         "predicted": predicted,
         "expected": expected,
         "correct": predicted == expected,
+    }
+
+
+def run_batch(
+    records: list[dict[str, Any]],
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Run the pipeline on multiple records and aggregate results.
+
+    Args:
+        records: list of dataset records (from load_jsonl).
+        limit:   if given, process only the first N records.
+                 Must be >= 1 when specified.
+
+    Returns a dict with keys:
+        results  — list of run_one() outputs (in order)
+        total    — number of records processed
+        correct  — number of correct predictions
+        accuracy — correct / total (float), or 0.0 when total == 0
+
+    Raises:
+        ValueError: limit is given but < 1.
+    """
+    if limit is not None and limit < 1:
+        raise ValueError(f"limit must be >= 1, got {limit}")
+
+    subset = records[:limit] if limit is not None else records
+    results = [run_one(r) for r in subset]
+    total = len(results)
+    correct = sum(1 for r in results if r["correct"])
+    accuracy = correct / total if total > 0 else 0.0
+
+    return {
+        "results": results,
+        "total": total,
+        "correct": correct,
+        "accuracy": accuracy,
     }
