@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Day3 batch baseline over shadow_eval.jsonl.
+"""Run the Day4 batch baseline over shadow_eval.jsonl.
 
 Usage:
     python scripts/run_baseline_batch.py
@@ -44,10 +44,16 @@ def main() -> int:
     batch = run_batch(records, limit=args.limit)
     summary = format_summary(batch)
 
-    print("=== Day3 batch baseline — summary ===")
-    print(f"  total   : {summary['total']}")
-    print(f"  correct : {summary['correct']}")
-    print(f"  accuracy: {summary['accuracy']:.4f}")
+    comp = summary["answer_5digit_compliance"]
+
+    print("=== Day4 batch baseline — summary ===")
+    print(f"  total              : {summary['total']}")
+    print(f"  correct            : {summary['correct']}")
+    print(f"  accuracy           : {summary['accuracy']:.4f}")
+    print(
+        f"  5digit_compliance  : {comp['compliant']}/{comp['total']}"
+        f"  ({comp['rate']:.4f})"
+    )
 
     if "breakdown_domain" in summary:
         print()

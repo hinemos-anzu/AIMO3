@@ -3,6 +3,7 @@
 Day1 goal: deterministic, comparable baseline.
 Day2 addition: run_batch() for multi-record aggregation.
 Day3 addition: format_summary() for human-readable breakdown.
+Day4 addition: 5-digit enforcement in run_one(); compliance metric in format_summary().
 Solver is a placeholder — returns "00000".
 """
 
@@ -38,9 +39,12 @@ def run_one(record: dict[str, Any]) -> dict[str, Any]:
 
     Returns a result dict with keys:
         id, domain, difficulty, predicted, expected, correct
+
+    Both predicted and expected are guaranteed to be 5-digit strings.
+    Raises ValueError if either cannot be normalised to 5 digits.
     """
-    predicted = solve_placeholder(record)
-    expected = record["answer"]  # already 5-digit in dataset
+    predicted = format_answer(solve_placeholder(record))
+    expected = format_answer(record["answer"])
 
     return {
         "id": record["id"],
@@ -115,11 +119,19 @@ def _breakdown(results: list[dict[str, Any]], key: str) -> dict[Any, dict[str, A
     }
 
 
+def _is_5digit(value: Any) -> bool:
+    """Return True iff value is a 5-character all-digit string."""
+    return isinstance(value, str) and len(value) == 5 and value.isdigit()
+
+
 def format_summary(batch: dict[str, Any]) -> dict[str, Any]:
     """Build an observable summary from run_batch() output.
 
     Always present:
         total, correct, accuracy
+        answer_5digit_compliance — {compliant, total, rate}
+            compliant: records where both predicted and expected are 5-digit strings
+            rate:      compliant / total (float)
 
     Present only when the field exists in at least one result:
         breakdown_domain     — per-domain  total/correct/accuracy
@@ -132,10 +144,22 @@ def format_summary(batch: dict[str, Any]) -> dict[str, Any]:
         summary dict (deterministic, comparable across runs).
     """
     results = batch["results"]
+    total = batch["total"]
+
+    compliant = sum(
+        1 for r in results
+        if _is_5digit(r.get("predicted")) and _is_5digit(r.get("expected"))
+    )
+
     summary: dict[str, Any] = {
-        "total": batch["total"],
+        "total": total,
         "correct": batch["correct"],
         "accuracy": batch["accuracy"],
+        "answer_5digit_compliance": {
+            "compliant": compliant,
+            "total": total,
+            "rate": compliant / total if total > 0 else 0.0,
+        },
     }
 
     domain_bd = _breakdown(results, "domain")
