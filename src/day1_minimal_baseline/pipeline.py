@@ -2,6 +2,7 @@
 
 Day1 goal: deterministic, comparable baseline.
 Day2 addition: run_batch() for multi-record aggregation.
+Day3 addition: format_summary() for human-readable breakdown.
 Solver is a placeholder — returns "00000".
 """
 
@@ -86,3 +87,63 @@ def run_batch(
         "correct": correct,
         "accuracy": accuracy,
     }
+
+
+def _breakdown(results: list[dict[str, Any]], key: str) -> dict[Any, dict[str, Any]]:
+    """Build a per-value breakdown dict for a single result field.
+
+    Only counts entries where the field is present and not None.
+    Returns {} if no entry has the field.
+    """
+    groups: dict[Any, list[bool]] = {}
+    for r in results:
+        val = r.get(key)
+        if val is None:
+            continue
+        groups.setdefault(val, []).append(r["correct"])
+
+    if not groups:
+        return {}
+
+    return {
+        val: {
+            "total": len(corrects),
+            "correct": sum(corrects),
+            "accuracy": sum(corrects) / len(corrects),
+        }
+        for val, corrects in sorted(groups.items(), key=lambda x: str(x[0]))
+    }
+
+
+def format_summary(batch: dict[str, Any]) -> dict[str, Any]:
+    """Build an observable summary from run_batch() output.
+
+    Always present:
+        total, correct, accuracy
+
+    Present only when the field exists in at least one result:
+        breakdown_domain     — per-domain  total/correct/accuracy
+        breakdown_difficulty — per-difficulty total/correct/accuracy
+
+    Args:
+        batch: return value of run_batch().
+
+    Returns:
+        summary dict (deterministic, comparable across runs).
+    """
+    results = batch["results"]
+    summary: dict[str, Any] = {
+        "total": batch["total"],
+        "correct": batch["correct"],
+        "accuracy": batch["accuracy"],
+    }
+
+    domain_bd = _breakdown(results, "domain")
+    if domain_bd:
+        summary["breakdown_domain"] = domain_bd
+
+    difficulty_bd = _breakdown(results, "difficulty")
+    if difficulty_bd:
+        summary["breakdown_difficulty"] = difficulty_bd
+
+    return summary
