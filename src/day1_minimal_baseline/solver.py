@@ -111,7 +111,7 @@ def _make_llm_solver(model: str = "claude-haiku-4-5-20251001") -> Callable[[dict
     return solve
 
 
-def _make_cli_solver(subprocess_timeout: float = 200.0) -> Callable[[dict[str, Any]], str]:
+def _make_cli_solver(subprocess_timeout: float = 240.0) -> Callable[[dict[str, Any]], str]:
     """Return a solver that calls `claude --print` as a subprocess.
 
     Uses Claude Code subscription authentication — no ANTHROPIC_API_KEY required.
@@ -119,7 +119,7 @@ def _make_cli_solver(subprocess_timeout: float = 200.0) -> Callable[[dict[str, A
 
     Args:
         subprocess_timeout: seconds to wait for the subprocess before raising
-                            subprocess.TimeoutExpired (default 200s).
+                            subprocess.TimeoutExpired (default 240s).
 
     Raises:
         SolverConfigError: `claude` CLI not found in PATH.
