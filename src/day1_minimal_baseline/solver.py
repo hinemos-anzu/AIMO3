@@ -24,6 +24,7 @@ Design rules (same as pipeline.py):
 """
 
 import os
+import re
 import shutil
 import subprocess
 from typing import Any, Callable
@@ -152,9 +153,42 @@ def _make_cli_solver(subprocess_timeout: float = 200.0) -> Callable[[dict[str, A
             raise RuntimeError(
                 f"claude --print exited {result.returncode}: {result.stderr.strip()}"
             )
-        return result.stdout.strip()
+        return _extract_integer(result.stdout)
 
     return solve
+
+
+def _extract_integer(text: str) -> str:
+    """Extract a 1-3 digit integer from model output.
+
+    The model may return reasoning prose before the final answer.
+    Extraction priority:
+      1. LaTeX boxed answer: \\boxed{N}
+      2. Last line that is purely numeric (ignoring whitespace)
+      3. Last standalone 1-3 digit integer in the text
+
+    Returns the extracted number as a string, or the original stripped text
+    if no integer is found (causing format_answer() to raise ValueError).
+    """
+    stripped = text.strip()
+
+    # 1. LaTeX boxed: \boxed{123}
+    boxed = re.findall(r'\\boxed\{(\d{1,3})\}', stripped)
+    if boxed:
+        return boxed[-1]
+
+    # 2. Last non-empty line that is purely digits
+    for line in reversed(stripped.splitlines()):
+        line = line.strip()
+        if line.isdigit() and 1 <= len(line) <= 3:
+            return line
+
+    # 3. Last standalone 1-3 digit integer (word boundary)
+    matches = re.findall(r'\b(\d{1,3})\b', stripped)
+    if matches:
+        return matches[-1]
+
+    return stripped
 
 
 def create_solver(
