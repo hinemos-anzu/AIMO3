@@ -31,6 +31,7 @@ from day1_minimal_baseline.pipeline import (
     run_batch_with_candidates,
     run_batch_with_retry,
 )
+from day1_minimal_baseline.solver import LLM, PLACEHOLDER, SolverConfigError, create_solver
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "shadow_eval.jsonl")
 
@@ -74,17 +75,39 @@ def main() -> int:
         metavar="N",
         help="Number of solver candidates per problem: 1 (default), 16, 32, 64, ...",
     )
+    parser.add_argument(
+        "--solver-mode",
+        default=PLACEHOLDER,
+        choices=[PLACEHOLDER, LLM],
+        help=f"'{PLACEHOLDER}' (default) or '{LLM}' (requires ANTHROPIC_API_KEY)",
+    )
+    parser.add_argument(
+        "--model",
+        default="claude-haiku-4-5-20251001",
+        help="Claude model ID (used only when --solver-mode llm)",
+    )
     args = parser.parse_args()
+
+    # Resolve solver
+    if args.solver_mode == LLM:
+        try:
+            solver_fn = create_solver(LLM, model=args.model)
+        except SolverConfigError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    else:
+        solver_fn = None  # None → solve_placeholder inside pipeline
 
     records = load_jsonl(DATA_PATH)
 
-    if args.num_candidates > 1:
+    if args.num_candidates > 1 or args.solver_mode == LLM:
         batch = run_batch_with_candidates(
             records,
             limit=args.limit,
             num_candidates=args.num_candidates,
             max_retries=args.max_retries,
             timeout_sec=args.timeout_sec,
+            solver=solver_fn,
         )
     elif args.max_retries > 0:
         batch = run_batch_with_retry(
@@ -92,6 +115,7 @@ def main() -> int:
             limit=args.limit,
             max_retries=args.max_retries,
             timeout_sec=args.timeout_sec,
+            solver=solver_fn,
         )
     else:
         batch = run_batch(records, limit=args.limit)
@@ -107,6 +131,13 @@ def main() -> int:
         f"  5digit_compliance  : {comp['compliant']}/{comp['total']}"
         f"  ({comp['rate']:.4f})"
     )
+
+    if "parse_stats" in summary:
+        ps = summary["parse_stats"]
+        print()
+        print("  parse stats:")
+        print(f"    parse_success_count : {ps['parse_success_count']}")
+        print(f"    parse_failure_count : {ps['parse_failure_count']}")
 
     if "candidate_stats" in summary:
         cs = summary["candidate_stats"]
