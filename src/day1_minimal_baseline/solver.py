@@ -1,30 +1,38 @@
 """Solver adapter for Day6+.
 
-Provides two modes:
+Provides three modes:
   "placeholder"  — always returns "00000" (Day1-Day5 baseline behaviour).
   "llm"          — calls the Anthropic Claude API with problem metadata.
+                   Requires ANTHROPIC_API_KEY env var.
+  "cli"          — calls `claude --print` subprocess.
+                   Uses Claude Code subscription auth — no API key needed.
+                   Requires the `claude` CLI to be available in PATH.
 
 Usage:
-    from day1_minimal_baseline.solver import create_solver, PLACEHOLDER, LLM
+    from day1_minimal_baseline.solver import create_solver, PLACEHOLDER, LLM, CLI
 
     solver = create_solver(PLACEHOLDER)          # no API key needed
     solver = create_solver(LLM, model="...")     # requires ANTHROPIC_API_KEY
+    solver = create_solver(CLI)                  # requires claude CLI in PATH
 
 Design rules (same as pipeline.py):
   - Silent fallback is forbidden.
   - SolverConfigError is raised explicitly when the environment is
-    misconfigured (missing API key, missing package).
+    misconfigured (missing API key, missing package, missing CLI).
   - The solver function returns a raw string; callers use format_answer()
     to normalise it to a 5-digit string.
 """
 
 import os
+import shutil
+import subprocess
 from typing import Any, Callable
 
 PLACEHOLDER = "placeholder"
 LLM = "llm"
+CLI = "cli"
 
-VALID_MODES = (PLACEHOLDER, LLM)
+VALID_MODES = (PLACEHOLDER, LLM, CLI)
 
 
 class SolverConfigError(ValueError):
@@ -102,6 +110,53 @@ def _make_llm_solver(model: str = "claude-haiku-4-5-20251001") -> Callable[[dict
     return solve
 
 
+def _make_cli_solver(subprocess_timeout: float = 200.0) -> Callable[[dict[str, Any]], str]:
+    """Return a solver that calls `claude --print` as a subprocess.
+
+    Uses Claude Code subscription authentication — no ANTHROPIC_API_KEY required.
+    The `claude` CLI must be available in PATH.
+
+    Args:
+        subprocess_timeout: seconds to wait for the subprocess before raising
+                            subprocess.TimeoutExpired (default 200s).
+
+    Raises:
+        SolverConfigError: `claude` CLI not found in PATH.
+    """
+    if not shutil.which("claude"):
+        raise SolverConfigError(
+            "`claude` CLI not found in PATH.\n"
+            "CLI solver requires Claude Code to be installed.\n"
+            "Install Claude Code or use --solver-mode placeholder."
+        )
+
+    def solve(record: dict[str, Any]) -> str:
+        """Call `claude --print` with compact AIME metadata prompt."""
+        notes = record.get("notes", "")
+        prompt = (
+            f"You are solving an AIME competition problem.\n"
+            f"Problem source: {record['source']}\n"
+            f"Domain: {record['domain']}\n"
+            f"Difficulty: {record['difficulty']} (1=easier, 2=harder)\n"
+            f"Topic hint: {notes}\n"
+            f"AIME answers are integers 0-999. Reply ONLY with the integer."
+        )
+        result = subprocess.run(
+            ["claude", "--print", "--output-format", "text"],
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=subprocess_timeout,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"claude --print exited {result.returncode}: {result.stderr.strip()}"
+            )
+        return result.stdout.strip()
+
+    return solve
+
+
 def create_solver(
     mode: str = PLACEHOLDER,
     model: str = "claude-haiku-4-5-20251001",
@@ -109,22 +164,25 @@ def create_solver(
     """Create and return a solver callable for the given mode.
 
     Args:
-        mode:  "placeholder" (default) or "llm".
+        mode:  "placeholder" (default), "llm", or "cli".
         model: Claude model ID used when mode="llm".
-               Ignored in placeholder mode.
+               Ignored in placeholder and cli modes.
 
     Returns:
         A callable: (record: dict) -> str (raw answer, not yet normalised).
 
     Raises:
         ValueError:        unknown mode string.
-        SolverConfigError: mode="llm" but ANTHROPIC_API_KEY is not set.
+        SolverConfigError: mode="llm" but ANTHROPIC_API_KEY is not set,
+                           or mode="cli" but `claude` CLI not in PATH.
         ImportError:       mode="llm" but anthropic package is missing.
     """
     if mode == PLACEHOLDER:
         return _make_placeholder_solver()
     if mode == LLM:
         return _make_llm_solver(model=model)
+    if mode == CLI:
+        return _make_cli_solver()
     raise ValueError(
         f"Unknown solver mode: {mode!r}. "
         f"Valid modes: {VALID_MODES}"

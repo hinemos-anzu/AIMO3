@@ -5,9 +5,11 @@ Usage:
     python scripts/run_baseline_once.py
     python scripts/run_baseline_once.py --solver-mode llm
     python scripts/run_baseline_once.py --solver-mode llm --model claude-haiku-4-5-20251001
+    python scripts/run_baseline_once.py --solver-mode cli
 
 --solver-mode placeholder (default): no API key required.
 --solver-mode llm: requires ANTHROPIC_API_KEY environment variable.
+--solver-mode cli: uses `claude --print` subprocess (subscription auth, no API key).
 
 Exits with code 0 on success, 1 on any error.
 """
@@ -20,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from day1_minimal_baseline.io import load_jsonl
 from day1_minimal_baseline.pipeline import run_one, run_one_with_candidates
-from day1_minimal_baseline.solver import LLM, PLACEHOLDER, SolverConfigError, create_solver
+from day1_minimal_baseline.solver import CLI, LLM, PLACEHOLDER, SolverConfigError, create_solver
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "shadow_eval.jsonl")
 
@@ -30,8 +32,12 @@ def main() -> int:
     parser.add_argument(
         "--solver-mode",
         default=PLACEHOLDER,
-        choices=[PLACEHOLDER, LLM],
-        help=f"Solver mode: '{PLACEHOLDER}' (default, no API key) or '{LLM}'",
+        choices=[PLACEHOLDER, LLM, CLI],
+        help=(
+            f"Solver mode: '{PLACEHOLDER}' (default, no API key), "
+            f"'{LLM}' (requires ANTHROPIC_API_KEY), or "
+            f"'{CLI}' (claude --print, subscription auth)"
+        ),
     )
     parser.add_argument(
         "--model",
@@ -43,9 +49,9 @@ def main() -> int:
     records = load_jsonl(DATA_PATH)
     first = records[0]
 
-    if args.solver_mode == LLM:
+    if args.solver_mode in (LLM, CLI):
         try:
-            solver_fn = create_solver(LLM, model=args.model)
+            solver_fn = create_solver(args.solver_mode, model=args.model)
         except SolverConfigError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1

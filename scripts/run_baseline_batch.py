@@ -31,7 +31,7 @@ from day1_minimal_baseline.pipeline import (
     run_batch_with_candidates,
     run_batch_with_retry,
 )
-from day1_minimal_baseline.solver import LLM, PLACEHOLDER, SolverConfigError, create_solver
+from day1_minimal_baseline.solver import CLI, LLM, PLACEHOLDER, SolverConfigError, create_solver
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "shadow_eval.jsonl")
 
@@ -78,8 +78,12 @@ def main() -> int:
     parser.add_argument(
         "--solver-mode",
         default=PLACEHOLDER,
-        choices=[PLACEHOLDER, LLM],
-        help=f"'{PLACEHOLDER}' (default) or '{LLM}' (requires ANTHROPIC_API_KEY)",
+        choices=[PLACEHOLDER, LLM, CLI],
+        help=(
+            f"'{PLACEHOLDER}' (default), "
+            f"'{LLM}' (requires ANTHROPIC_API_KEY), or "
+            f"'{CLI}' (claude --print, subscription auth)"
+        ),
     )
     parser.add_argument(
         "--model",
@@ -89,9 +93,9 @@ def main() -> int:
     args = parser.parse_args()
 
     # Resolve solver
-    if args.solver_mode == LLM:
+    if args.solver_mode in (LLM, CLI):
         try:
-            solver_fn = create_solver(LLM, model=args.model)
+            solver_fn = create_solver(args.solver_mode, model=args.model)
         except SolverConfigError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1
@@ -100,7 +104,7 @@ def main() -> int:
 
     records = load_jsonl(DATA_PATH)
 
-    if args.num_candidates > 1 or args.solver_mode == LLM:
+    if args.num_candidates > 1 or args.solver_mode in (LLM, CLI):
         batch = run_batch_with_candidates(
             records,
             limit=args.limit,
