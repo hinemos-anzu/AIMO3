@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Run the Day4 batch baseline over shadow_eval.jsonl.
+"""Run the Day5 Run2 batch baseline over shadow_eval.jsonl.
 
 Usage:
     python scripts/run_baseline_batch.py
     python scripts/run_baseline_batch.py --limit 3
+    python scripts/run_baseline_batch.py --max-retries 1
+    python scripts/run_baseline_batch.py --max-retries 2 --timeout-sec 250
+
+--max-retries 0 (default) uses run_batch() path — backward compatible.
+--max-retries >= 1 uses run_batch_with_retry() and shows retry stats.
 
 Exits with code 0 on success, 1 on any error.
 """
@@ -15,7 +20,11 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from day1_minimal_baseline.io import load_jsonl
-from day1_minimal_baseline.pipeline import format_summary, run_batch
+from day1_minimal_baseline.pipeline import (
+    format_summary,
+    run_batch,
+    run_batch_with_retry,
+)
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "shadow_eval.jsonl")
 
@@ -38,15 +47,38 @@ def main() -> int:
         metavar="N",
         help="Process only the first N records (default: all)",
     )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=0,
+        metavar="R",
+        help="Per-problem retry limit on exec errors: 0=no retry (default), 1, 2, ...",
+    )
+    parser.add_argument(
+        "--timeout-sec",
+        type=float,
+        default=250.0,
+        metavar="T",
+        help="Per-problem wall-clock time limit in seconds (default: 250)",
+    )
     args = parser.parse_args()
 
     records = load_jsonl(DATA_PATH)
-    batch = run_batch(records, limit=args.limit)
-    summary = format_summary(batch)
 
+    if args.max_retries > 0:
+        batch = run_batch_with_retry(
+            records,
+            limit=args.limit,
+            max_retries=args.max_retries,
+            timeout_sec=args.timeout_sec,
+        )
+    else:
+        batch = run_batch(records, limit=args.limit)
+
+    summary = format_summary(batch)
     comp = summary["answer_5digit_compliance"]
 
-    print("=== Day4 batch baseline — summary ===")
+    print("=== Day5 Run2 batch baseline — summary ===")
     print(f"  total              : {summary['total']}")
     print(f"  correct            : {summary['correct']}")
     print(f"  accuracy           : {summary['accuracy']:.4f}")
@@ -54,6 +86,17 @@ def main() -> int:
         f"  5digit_compliance  : {comp['compliant']}/{comp['total']}"
         f"  ({comp['rate']:.4f})"
     )
+
+    if "retry_stats" in summary:
+        rs = summary["retry_stats"]
+        print()
+        print("  retry stats:")
+        print(f"    max_retries_setting : {rs['max_retries_setting']}")
+        print(f"    timeout_sec_setting : {rs['timeout_sec_setting']}")
+        print(f"    retry_count_used    : {rs['retry_count_used']}")
+        print(f"    exec_error_count    : {rs['exec_error_count']}")
+        print(f"    avg_runtime_sec     : {rs['avg_runtime_sec']:.4f}")
+        print(f"    max_runtime_sec     : {rs['max_runtime_sec']:.4f}")
 
     if "breakdown_domain" in summary:
         print()

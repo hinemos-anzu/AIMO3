@@ -4,10 +4,19 @@ Day1 goal: deterministic, comparable baseline.
 Day2 addition: run_batch() for multi-record aggregation.
 Day3 addition: format_summary() for human-readable breakdown.
 Day4 addition: 5-digit enforcement in run_one(); compliance metric in format_summary().
+Day5 Run2 addition: run_one_with_retry() / run_batch_with_retry(); ExecTimeoutError.
 Solver is a placeholder — returns "00000".
 """
 
+import time
 from typing import Any
+
+
+class ExecTimeoutError(RuntimeError):
+    """Raised when a single problem exceeds its per-problem time limit.
+
+    Never retried — always fatal for that problem.
+    """
 
 
 def solve_placeholder(record: dict[str, Any]) -> str:
@@ -93,6 +102,139 @@ def run_batch(
     }
 
 
+def run_one_with_retry(
+    record: dict[str, Any],
+    max_retries: int = 0,
+    timeout_sec: float = 250.0,
+) -> dict[str, Any]:
+    """Run the solver with retry on execution errors.
+
+    Retry fires on: any Exception from the solver call (SyntaxError,
+    RuntimeError, ValueError, etc.).
+    Retry does NOT fire on: ExecTimeoutError — timeout is always fatal.
+    Silent fallback is forbidden — exhausted retries raise RuntimeError.
+
+    Args:
+        record:      single dataset record.
+        max_retries: number of additional attempts after the first.
+                     0 = no retry (same as run_one).  Must be >= 0.
+        timeout_sec: per-problem wall-clock limit in seconds.
+                     Checked before each attempt.  Must be > 0.
+
+    Returns a dict with the same keys as run_one() plus:
+        retries_used     — attempts made beyond the first (0 = first try OK)
+        exec_error_count — number of failed attempts
+        elapsed_sec      — total wall-clock time for this record
+        exec_errors      — list of error strings from failed attempts
+
+    Raises:
+        ValueError:       max_retries < 0 or timeout_sec <= 0.
+        ExecTimeoutError: elapsed time exceeds timeout_sec.
+        RuntimeError:     all attempts exhausted.
+    """
+    if max_retries < 0:
+        raise ValueError(f"max_retries must be >= 0, got {max_retries}")
+    if timeout_sec <= 0:
+        raise ValueError(f"timeout_sec must be > 0, got {timeout_sec}")
+
+    start = time.monotonic()
+    exec_error_log: list[str] = []
+    max_attempts = max_retries + 1
+
+    for attempt in range(max_attempts):
+        elapsed = time.monotonic() - start
+        if elapsed > timeout_sec:
+            raise ExecTimeoutError(
+                f"{record['id']}: timeout {elapsed:.1f}s > {timeout_sec}s "
+                f"before attempt {attempt}"
+            )
+
+        try:
+            predicted = format_answer(solve_placeholder(record))
+            expected = format_answer(record["answer"])
+            elapsed = time.monotonic() - start
+            return {
+                "id": record["id"],
+                "domain": record.get("domain"),
+                "difficulty": record.get("difficulty"),
+                "predicted": predicted,
+                "expected": expected,
+                "correct": predicted == expected,
+                "retries_used": attempt,
+                "exec_error_count": len(exec_error_log),
+                "elapsed_sec": round(elapsed, 6),
+                "exec_errors": exec_error_log,
+            }
+        except ExecTimeoutError:
+            raise  # timeout always propagates immediately
+        except Exception as exc:
+            exec_error_log.append(
+                f"attempt={attempt} {type(exc).__name__}: {exc}"
+            )
+
+    # All attempts exhausted — explicit failure, no silent fallback
+    raise RuntimeError(
+        f"{record['id']}: all {max_attempts} attempt(s) failed. "
+        f"Errors: {exec_error_log}"
+    )
+
+
+def run_batch_with_retry(
+    records: list[dict[str, Any]],
+    limit: int | None = None,
+    max_retries: int = 0,
+    timeout_sec: float = 250.0,
+) -> dict[str, Any]:
+    """Run the pipeline on multiple records with per-problem retry.
+
+    Aggregates retry and timing statistics across all records.
+
+    Args:
+        records:     list of dataset records (from load_jsonl).
+        limit:       if given, process only the first N records (>= 1).
+        max_retries: per-problem retry limit (0 = no retry).
+        timeout_sec: per-problem wall-clock limit in seconds.
+
+    Returns a dict with the same base keys as run_batch() plus:
+        retry_count_used    — total retries consumed across all records
+        exec_error_count    — total execution errors across all records
+        avg_runtime_sec     — mean elapsed_sec across records
+        max_runtime_sec     — maximum elapsed_sec across records
+        max_retries_setting — the max_retries value used
+        timeout_sec_setting — the timeout_sec value used
+
+    Raises:
+        ValueError:       limit < 1.
+        ExecTimeoutError: any problem exceeds timeout_sec.
+        RuntimeError:     any problem exhausts all retries.
+    """
+    if limit is not None and limit < 1:
+        raise ValueError(f"limit must be >= 1, got {limit}")
+
+    subset = records[:limit] if limit is not None else records
+    results = [
+        run_one_with_retry(r, max_retries=max_retries, timeout_sec=timeout_sec)
+        for r in subset
+    ]
+    total = len(results)
+    correct = sum(1 for r in results if r["correct"])
+    accuracy = correct / total if total > 0 else 0.0
+    elapsed_times = [r["elapsed_sec"] for r in results]
+
+    return {
+        "results": results,
+        "total": total,
+        "correct": correct,
+        "accuracy": accuracy,
+        "retry_count_used": sum(r["retries_used"] for r in results),
+        "exec_error_count": sum(r["exec_error_count"] for r in results),
+        "avg_runtime_sec": sum(elapsed_times) / total if total > 0 else 0.0,
+        "max_runtime_sec": max(elapsed_times) if elapsed_times else 0.0,
+        "max_retries_setting": max_retries,
+        "timeout_sec_setting": timeout_sec,
+    }
+
+
 def _breakdown(results: list[dict[str, Any]], key: str) -> dict[Any, dict[str, Any]]:
     """Build a per-value breakdown dict for a single result field.
 
@@ -169,5 +311,16 @@ def format_summary(batch: dict[str, Any]) -> dict[str, Any]:
     difficulty_bd = _breakdown(results, "difficulty")
     if difficulty_bd:
         summary["breakdown_difficulty"] = difficulty_bd
+
+    # Retry stats — present only when batch came from run_batch_with_retry()
+    if "retry_count_used" in batch:
+        summary["retry_stats"] = {
+            "retry_count_used": batch["retry_count_used"],
+            "exec_error_count": batch["exec_error_count"],
+            "avg_runtime_sec": round(batch["avg_runtime_sec"], 4),
+            "max_runtime_sec": round(batch["max_runtime_sec"], 4),
+            "max_retries_setting": batch["max_retries_setting"],
+            "timeout_sec_setting": batch["timeout_sec_setting"],
+        }
 
     return summary
