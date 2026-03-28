@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Run the Day5 Run2 batch baseline over shadow_eval.jsonl.
+"""Run the Day5 Run3 batch baseline over shadow_eval.jsonl.
 
 Usage:
-    python scripts/run_baseline_batch.py
+    python scripts/run_baseline_batch.py                           # N=1, retry=0
     python scripts/run_baseline_batch.py --limit 3
-    python scripts/run_baseline_batch.py --max-retries 1
-    python scripts/run_baseline_batch.py --max-retries 2 --timeout-sec 250
+    python scripts/run_baseline_batch.py --max-retries 1           # Run2 path
+    python scripts/run_baseline_batch.py --num-candidates 16       # Run3 N=16
+    python scripts/run_baseline_batch.py --num-candidates 32       # Run3 N=32
+    python scripts/run_baseline_batch.py --num-candidates 64       # Run3 N=64
+    python scripts/run_baseline_batch.py --num-candidates 16 --max-retries 1
 
---max-retries 0 (default) uses run_batch() path — backward compatible.
---max-retries >= 1 uses run_batch_with_retry() and shows retry stats.
+Routing:
+    num_candidates=1  AND max_retries=0 → run_batch()            (backward compat)
+    num_candidates=1  AND max_retries>0 → run_batch_with_retry() (Run2)
+    num_candidates>1                    → run_batch_with_candidates() (Run3)
 
 Exits with code 0 on success, 1 on any error.
 """
@@ -23,6 +28,7 @@ from day1_minimal_baseline.io import load_jsonl
 from day1_minimal_baseline.pipeline import (
     format_summary,
     run_batch,
+    run_batch_with_candidates,
     run_batch_with_retry,
 )
 
@@ -61,11 +67,26 @@ def main() -> int:
         metavar="T",
         help="Per-problem wall-clock time limit in seconds (default: 250)",
     )
+    parser.add_argument(
+        "--num-candidates",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Number of solver candidates per problem: 1 (default), 16, 32, 64, ...",
+    )
     args = parser.parse_args()
 
     records = load_jsonl(DATA_PATH)
 
-    if args.max_retries > 0:
+    if args.num_candidates > 1:
+        batch = run_batch_with_candidates(
+            records,
+            limit=args.limit,
+            num_candidates=args.num_candidates,
+            max_retries=args.max_retries,
+            timeout_sec=args.timeout_sec,
+        )
+    elif args.max_retries > 0:
         batch = run_batch_with_retry(
             records,
             limit=args.limit,
@@ -78,7 +99,7 @@ def main() -> int:
     summary = format_summary(batch)
     comp = summary["answer_5digit_compliance"]
 
-    print("=== Day5 Run2 batch baseline — summary ===")
+    print("=== Day5 Run3 batch baseline — summary ===")
     print(f"  total              : {summary['total']}")
     print(f"  correct            : {summary['correct']}")
     print(f"  accuracy           : {summary['accuracy']:.4f}")
@@ -86,6 +107,13 @@ def main() -> int:
         f"  5digit_compliance  : {comp['compliant']}/{comp['total']}"
         f"  ({comp['rate']:.4f})"
     )
+
+    if "candidate_stats" in summary:
+        cs = summary["candidate_stats"]
+        print()
+        print("  candidate stats:")
+        print(f"    num_candidates_setting  : {cs['num_candidates_setting']}")
+        print(f"    avg_candidate_diversity : {cs['avg_candidate_diversity']:.6f}")
 
     if "retry_stats" in summary:
         rs = summary["retry_stats"]

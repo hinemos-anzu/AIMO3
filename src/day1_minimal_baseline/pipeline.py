@@ -5,10 +5,13 @@ Day2 addition: run_batch() for multi-record aggregation.
 Day3 addition: format_summary() for human-readable breakdown.
 Day4 addition: 5-digit enforcement in run_one(); compliance metric in format_summary().
 Day5 Run2 addition: run_one_with_retry() / run_batch_with_retry(); ExecTimeoutError.
+Day5 Run3 addition: generate_candidates() / select_by_majority() /
+                    run_one_with_candidates() / run_batch_with_candidates().
 Solver is a placeholder — returns "00000".
 """
 
 import time
+from collections import Counter
 from typing import Any
 
 
@@ -235,6 +238,176 @@ def run_batch_with_retry(
     }
 
 
+def generate_candidates(
+    record: dict[str, Any],
+    num_candidates: int,
+) -> list[str]:
+    """Generate num_candidates answer strings from the solver.
+
+    With the placeholder, returns num_candidates copies of "00000".
+    With a real solver this would produce N independently sampled answers.
+
+    Raises:
+        ValueError:  num_candidates < 1.
+        MemoryError: OOM from the solver — propagates to caller (not caught).
+    """
+    if num_candidates < 1:
+        raise ValueError(f"num_candidates must be >= 1, got {num_candidates}")
+    return [format_answer(solve_placeholder(record)) for _ in range(num_candidates)]
+
+
+def select_by_majority(candidates: list[str]) -> str:
+    """Return the most frequent candidate; break ties by smallest value.
+
+    Deterministic: ties resolved lexicographically (smallest answer wins).
+
+    Raises:
+        ValueError: candidates is empty.
+    """
+    if not candidates:
+        raise ValueError("candidates list is empty")
+    counts = Counter(candidates)
+    return min(counts, key=lambda a: (-counts[a], a))
+
+
+def run_one_with_candidates(
+    record: dict[str, Any],
+    num_candidates: int = 1,
+    max_retries: int = 0,
+    timeout_sec: float = 250.0,
+) -> dict[str, Any]:
+    """Run solver with N-candidate generation, majority vote, and optional retry.
+
+    Fixed settings (Run1 + Run2):
+        Answer normalisation: format_answer() — unchanged.
+        Retry logic:          same as run_one_with_retry() — unchanged.
+
+    Variable (Run3):
+        num_candidates: number of solver samples per attempt.
+
+    MemoryError (OOM) is never retried — it is always re-raised immediately.
+    ExecTimeoutError is never retried — always re-raised immediately.
+    All other exceptions trigger a retry up to max_retries times.
+    Exhausted retries raise RuntimeError — no silent fallback.
+
+    Returns a result dict with the same keys as run_one_with_retry() plus:
+        num_candidates_setting — N used for this record
+        candidate_diversity    — unique_candidates / N  (0.0–1.0)
+        candidates             — all generated candidate strings (len == N)
+
+    Raises:
+        ValueError:       invalid arguments.
+        ExecTimeoutError: elapsed time exceeds timeout_sec.
+        MemoryError:      OOM during candidate generation.
+        RuntimeError:     all retry attempts exhausted.
+    """
+    if num_candidates < 1:
+        raise ValueError(f"num_candidates must be >= 1, got {num_candidates}")
+    if max_retries < 0:
+        raise ValueError(f"max_retries must be >= 0, got {max_retries}")
+    if timeout_sec <= 0:
+        raise ValueError(f"timeout_sec must be > 0, got {timeout_sec}")
+
+    start = time.monotonic()
+    exec_error_log: list[str] = []
+    max_attempts = max_retries + 1
+
+    for attempt in range(max_attempts):
+        elapsed = time.monotonic() - start
+        if elapsed > timeout_sec:
+            raise ExecTimeoutError(
+                f"{record['id']}: timeout {elapsed:.1f}s > {timeout_sec}s "
+                f"before attempt {attempt}"
+            )
+
+        try:
+            candidates = generate_candidates(record, num_candidates)
+            predicted = select_by_majority(candidates)
+            expected = format_answer(record["answer"])
+            elapsed = time.monotonic() - start
+            diversity = len(set(candidates)) / num_candidates
+            return {
+                "id": record["id"],
+                "domain": record.get("domain"),
+                "difficulty": record.get("difficulty"),
+                "predicted": predicted,
+                "expected": expected,
+                "correct": predicted == expected,
+                "retries_used": attempt,
+                "exec_error_count": len(exec_error_log),
+                "elapsed_sec": round(elapsed, 6),
+                "exec_errors": exec_error_log,
+                "num_candidates_setting": num_candidates,
+                "candidate_diversity": round(diversity, 6),
+                "candidates": candidates,
+            }
+        except (ExecTimeoutError, MemoryError):
+            raise  # these are always fatal — never retried
+        except Exception as exc:
+            exec_error_log.append(
+                f"attempt={attempt} {type(exc).__name__}: {exc}"
+            )
+
+    raise RuntimeError(
+        f"{record['id']}: all {max_attempts} attempt(s) failed. "
+        f"Errors: {exec_error_log}"
+    )
+
+
+def run_batch_with_candidates(
+    records: list[dict[str, Any]],
+    limit: int | None = None,
+    num_candidates: int = 1,
+    max_retries: int = 0,
+    timeout_sec: float = 250.0,
+) -> dict[str, Any]:
+    """Run the full pipeline (candidates + retry) over multiple records.
+
+    Returns the same base keys as run_batch_with_retry() plus:
+        num_candidates_setting — N used for this batch
+        avg_candidate_diversity — mean per-problem candidate_diversity
+
+    Raises:
+        ValueError:       limit < 1 or invalid num_candidates / max_retries.
+        ExecTimeoutError: any problem exceeds timeout_sec.
+        MemoryError:      OOM on any problem (not retried).
+        RuntimeError:     any problem exhausts all retries.
+    """
+    if limit is not None and limit < 1:
+        raise ValueError(f"limit must be >= 1, got {limit}")
+
+    subset = records[:limit] if limit is not None else records
+    results = [
+        run_one_with_candidates(
+            r,
+            num_candidates=num_candidates,
+            max_retries=max_retries,
+            timeout_sec=timeout_sec,
+        )
+        for r in subset
+    ]
+    total = len(results)
+    correct = sum(1 for r in results if r["correct"])
+    accuracy = correct / total if total > 0 else 0.0
+    elapsed_times = [r["elapsed_sec"] for r in results]
+    diversities = [r["candidate_diversity"] for r in results]
+
+    return {
+        "results": results,
+        "total": total,
+        "correct": correct,
+        "accuracy": accuracy,
+        "retry_count_used": sum(r["retries_used"] for r in results),
+        "exec_error_count": sum(r["exec_error_count"] for r in results),
+        "avg_runtime_sec": sum(elapsed_times) / total if total > 0 else 0.0,
+        "max_runtime_sec": max(elapsed_times) if elapsed_times else 0.0,
+        "max_retries_setting": max_retries,
+        "timeout_sec_setting": timeout_sec,
+        "num_candidates_setting": num_candidates,
+        "avg_candidate_diversity": sum(diversities) / total if total > 0 else 0.0,
+    }
+
+
 def _breakdown(results: list[dict[str, Any]], key: str) -> dict[Any, dict[str, Any]]:
     """Build a per-value breakdown dict for a single result field.
 
@@ -312,7 +485,8 @@ def format_summary(batch: dict[str, Any]) -> dict[str, Any]:
     if difficulty_bd:
         summary["breakdown_difficulty"] = difficulty_bd
 
-    # Retry stats — present only when batch came from run_batch_with_retry()
+    # Retry stats — present when batch came from run_batch_with_retry()
+    #               or run_batch_with_candidates()
     if "retry_count_used" in batch:
         summary["retry_stats"] = {
             "retry_count_used": batch["retry_count_used"],
@@ -321,6 +495,13 @@ def format_summary(batch: dict[str, Any]) -> dict[str, Any]:
             "max_runtime_sec": round(batch["max_runtime_sec"], 4),
             "max_retries_setting": batch["max_retries_setting"],
             "timeout_sec_setting": batch["timeout_sec_setting"],
+        }
+
+    # Candidate stats — present only when batch came from run_batch_with_candidates()
+    if "num_candidates_setting" in batch:
+        summary["candidate_stats"] = {
+            "num_candidates_setting": batch["num_candidates_setting"],
+            "avg_candidate_diversity": round(batch["avg_candidate_diversity"], 6),
         }
 
     return summary
