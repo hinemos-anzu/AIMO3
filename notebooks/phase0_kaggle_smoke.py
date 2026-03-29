@@ -54,13 +54,47 @@ _IS_KAGGLE = Path("/kaggle/working").exists()
 WORKING_DIR = Path("/kaggle/working") if _IS_KAGGLE else Path("/tmp/aimo3_phase0")
 WORKING_DIR.mkdir(parents=True, exist_ok=True)
 
-# モデルパス: 環境変数で上書き可能
-# Kaggle では /kaggle/input/<dataset-name>/ に置く
+# ---------------------------------------------------------------------------
+# モデル候補 (GATE1: 1本に確定するまでここを更新する)
+#
+# 第一候補: GPT-OSS-120B
+#   - VRAM: bf16=240GB(不可) / int8=120GB(2xH100) / int4=60GB(1xH100 可)
+#   - 1xH100(80GB) で動かすには int4 量子化 or tensor_parallel_size=2 必須
+#   - Kaggle dataset 名: 要確認 (TODO: PM に確認して埋める)
+#
+# 第二候補: Qwen3.5-27B
+#   - VRAM: bf16=54GB(1xH100 可) / int4=14GB(余裕)
+#   - 1xH100 bf16 でそのまま動く。量子化不要。
+#   - Kaggle dataset 名: 要確認 (TODO: PM に確認して埋める)
+#
+# 切替条件 (Phase 0 判断基準):
+#   - GPU メモリ >= 70GB → 第一候補 (int4) を試みる
+#   - GPU メモリ <  70GB → 第二候補 (bf16) に切替
+#   - 第一候補で CUDA OOM → 第二候補に切替 (FAIL として明示記録)
+#   - Phase 0 では第二候補 (Qwen3.5-27B) をデフォルトとして採用する
+#     理由: 1xH100 bf16 で確実に動作するため。GPT-OSS-120B は int4 動作確認後に昇格。
+# ---------------------------------------------------------------------------
+
+# TODO: 以下の <dataset-name> を実際の Kaggle Dataset 名に置き換えること
+#       PM またはコンペページで確認する
+MODEL_PRIMARY_NAME = "GPT-OSS-120B"
+MODEL_PRIMARY_PATH = "/kaggle/input/TODO-gpt-oss-120b/<dataset-name>/transformers/default/1"
+MODEL_PRIMARY_QUANT = "int4"           # 1xH100 で動かすには int4 必須
+MODEL_PRIMARY_VRAM_GB = 60             # int4 時の推定 VRAM (GB)
+
+MODEL_SECONDARY_NAME = "Qwen3.5-27B"
+MODEL_SECONDARY_PATH = "/kaggle/input/TODO-qwen35-27b/<dataset-name>/transformers/default/1"
+MODEL_SECONDARY_QUANT = "bf16"         # 1xH100 に収まる
+MODEL_SECONDARY_VRAM_GB = 54           # bf16 時の推定 VRAM (GB)
+
+# Phase 0 デフォルト: 第二候補 (Qwen3.5-27B, bf16, 1xH100 確実動作)
+# GPT-OSS-120B は int4 動作確認後に MODEL_PATH 上書きで試験する
+_DEFAULT_KAGGLE_PATH = MODEL_SECONDARY_PATH
+
+# モデルパス: 環境変数 MODEL_PATH で上書き可能
 DEFAULT_MODEL_PATH = os.environ.get(
     "MODEL_PATH",
-    "/kaggle/input/deepseek-r1-distill-qwen-7b/transformers/default/1"
-    if _IS_KAGGLE
-    else "/tmp/aimo3_phase0/model_stub",
+    _DEFAULT_KAGGLE_PATH if _IS_KAGGLE else "/tmp/aimo3_phase0/model_stub",
 )
 
 # 競技入力ファイル (Kaggle 提供)
