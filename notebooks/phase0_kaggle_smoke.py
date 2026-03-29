@@ -225,11 +225,33 @@ def check_model_weights(dry_run: bool, model_path: str) -> bool:
             config = json.load(f)
         model_type = config.get("model_type", "unknown")
         arch = config.get("architectures", ["unknown"])[0]
+
+        # --- 診断: モデルディレクトリのファイル一覧 ---
+        # modeling_*.py があれば trust_remote_code で読める可能性あり
+        # なければ transformers 組み込みサポートが必要
+        all_files = list(mp.iterdir())
+        py_files   = sorted(f.name for f in all_files if f.suffix == ".py")
+        json_files = sorted(f.name for f in all_files if f.suffix == ".json")
+        bin_files  = sorted(f.name for f in all_files if f.suffix in (".bin", ".safetensors"))
+        has_remote_code = any("modeling_" in n for n in py_files)
+
+        # arch が CausalLM でない場合は警告 (VLM / seq2seq の可能性)
+        is_causal_lm = "CausalLM" in arch or "ForCausalLM" in arch
+        arch_warn = (
+            "" if is_causal_lm
+            else f" WARN: arch={arch} は CausalLM でない。テキスト単体推論に非対応の可能性あり。"
+        )
+
         _record("CHECK_2_MODEL_WEIGHTS", "PASS", {
-            "message": f"model_type={model_type} arch={arch}",
+            "message": f"model_type={model_type} arch={arch}{arch_warn}",
             "model_path": model_path,
             "model_type": model_type,
             "architecture": arch,
+            "is_causal_lm": is_causal_lm,
+            "has_remote_code": has_remote_code,
+            "py_files": py_files,
+            "json_files": json_files,
+            "weight_files_count": len(bin_files),
         })
         return True
     except Exception as exc:
