@@ -83,8 +83,8 @@ MODEL_PRIMARY_QUANT = "int4"           # 1xH100 で動かすには int4 必須
 MODEL_PRIMARY_VRAM_GB = 60             # int4 時の推定 VRAM (GB)
 
 MODEL_SECONDARY_NAME = "Qwen3.5-27B"
-MODEL_SECONDARY_PATH = "/kaggle/input/TODO-qwen35-27b/<dataset-name>/transformers/default/1"
-MODEL_SECONDARY_QUANT = "bf16"         # 1xH100 に収まる
+MODEL_SECONDARY_PATH = "/kaggle/input/models/qwen-lm/qwen-3-5/transformers/qwen3.5-27b/1"  # 確定済み 2026-03-29
+MODEL_SECONDARY_QUANT = "bf16"         # 1xH100 に収まる (54 GB)
 MODEL_SECONDARY_VRAM_GB = 54           # bf16 時の推定 VRAM (GB)
 
 # Phase 0 デフォルト: 第二候補 (Qwen3.5-27B, bf16, 1xH100 確実動作)
@@ -244,7 +244,11 @@ def check_model_weights(dry_run: bool, model_path: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def check_imports(dry_run: bool) -> None:
-    """必要なパッケージが offline でインポートできるかを確認する。"""
+    """必要なパッケージが offline でインポートできるかを確認する。
+
+    torch がインポートできても CUDA ビルドでない場合は FAIL とする。
+    理由: torch+cpu では GPU 推論が不可能であり、silent fallback と同等の誤検知になるため。
+    """
     required = ["torch", "transformers", "accelerate"]
     results = {}
     all_ok = True
@@ -258,24 +262,59 @@ def check_imports(dry_run: bool) -> None:
             results[pkg] = {"status": "MISSING", "error": str(exc)}
             all_ok = False
 
-    if all_ok:
+    # torch が import できた場合、CUDA ビルドかどうかを追加確認する
+    # torch+cpu は import は通るが GPU 推論ができない → BLOCKER として明示する
+    cuda_ok = True
+    cuda_detail = {}
+    if results.get("torch", {}).get("status") == "OK":
+        try:
+            import torch
+            cuda_available = torch.cuda.is_available()
+            torch_ver = torch.__version__
+            is_cpu_build = "+cpu" in torch_ver
+            cuda_detail = {
+                "torch_version": torch_ver,
+                "cuda_available": cuda_available,
+                "is_cpu_build": is_cpu_build,
+            }
+            if is_cpu_build or not cuda_available:
+                cuda_ok = False
+                results["torch"]["cuda_status"] = "CPU_BUILD" if is_cpu_build else "CUDA_NOT_AVAILABLE"
+                results["torch"]["cuda_detail"] = cuda_detail
+        except Exception as exc:
+            cuda_ok = False
+            results["torch"]["cuda_status"] = f"CUDA_CHECK_ERROR: {exc}"
+
+    missing = [k for k, v in results.items() if v["status"] == "MISSING"]
+
+    if dry_run and missing:
+        _record("CHECK_3_IMPORTS", "SKIP", {
+            "message": f"dry-run: missing={missing} (expected in non-Kaggle env)",
+            "packages": results,
+        })
+    elif missing:
+        _record("CHECK_3_IMPORTS", "FAIL", {
+            "message": f"missing packages: {missing}",
+            "packages": results,
+        })
+    elif not cuda_ok:
+        # torch import は通るが CUDA 不可 → GPU 推論ができない BLOCKER
+        _record("CHECK_3_IMPORTS", "FAIL", {
+            "message": (
+                f"BLOCKER: torch={results['torch']['version']} は CUDA ビルドでない。"
+                f" GPU 推論不可。Kaggle Notebook の Accelerator を GPU に設定すること。"
+                f" cuda_detail={cuda_detail}"
+            ),
+            "packages": results,
+            "cuda_detail": cuda_detail,
+        })
+    else:
         ver_str = ", ".join(f"{k}={v['version']}" for k, v in results.items())
         _record("CHECK_3_IMPORTS", "PASS", {
             "message": ver_str,
             "packages": results,
+            "cuda_detail": cuda_detail,
         })
-    else:
-        missing = [k for k, v in results.items() if v["status"] == "MISSING"]
-        if dry_run:
-            _record("CHECK_3_IMPORTS", "SKIP", {
-                "message": f"dry-run: missing={missing} (expected in non-Kaggle env)",
-                "packages": results,
-            })
-        else:
-            _record("CHECK_3_IMPORTS", "FAIL", {
-                "message": f"missing packages: {missing}",
-                "packages": results,
-            })
 
 
 # ---------------------------------------------------------------------------
