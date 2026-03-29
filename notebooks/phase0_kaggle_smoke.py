@@ -82,12 +82,14 @@ MODEL_PRIMARY_PATH = "/kaggle/input/TODO-gpt-oss-120b/<dataset-name>/transformer
 MODEL_PRIMARY_QUANT = "int4"           # 1xH100 で動かすには int4 必須
 MODEL_PRIMARY_VRAM_GB = 60             # int4 時の推定 VRAM (GB)
 
-MODEL_SECONDARY_NAME = "Qwen3.5-27B"
-MODEL_SECONDARY_PATH = "/kaggle/input/models/qwen-lm/qwen-3-5/transformers/qwen3.5-27b/1"  # 確定済み 2026-03-29
-MODEL_SECONDARY_QUANT = "bf16"         # 1xH100 に収まる (54 GB)
-MODEL_SECONDARY_VRAM_GB = 54           # bf16 時の推定 VRAM (GB)
+MODEL_SECONDARY_NAME = "Qwen3.5-35B-A3B (MoE)"  # Phase 0 実行で確定 2026-03-29
+MODEL_SECONDARY_PATH = "/kaggle/input/models/qwen-lm/qwen-3-5/transformers/qwen3.5-35b-a3b/1"
+MODEL_SECONDARY_QUANT = "bf16"
+MODEL_SECONDARY_VRAM_GB = 54           # MoE: active_params=3B, bf16 ≈ 6GB active (全重みは別)
+# 実測: H100 79.2GB に bf16 でロード成功 (2026-03-29 Phase 0 確認)
+# 実測 load time: 1261.6s (693ファイル), 推論: ~32.5s/512tokens
 
-# Phase 0 デフォルト: 第二候補 (Qwen3.5-27B, bf16, 1xH100 確実動作)
+# Phase 0 確定: Qwen3.5-35B-A3B-MoE を デフォルトモデルとして採用
 # GPT-OSS-120B は int4 動作確認後に MODEL_PATH 上書きで試験する
 _DEFAULT_KAGGLE_PATH = MODEL_SECONDARY_PATH
 
@@ -448,7 +450,7 @@ def check_inference_and_output(dry_run: bool, model_weights_ok: bool, model_path
         print(f"[INFO] モデルをロード中 (bf16, device_map=auto): {model_path}", flush=True)
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,       # torch_dtype は deprecated → dtype を使用
             device_map="auto",
             trust_remote_code=True,
         )
@@ -468,12 +470,12 @@ def check_inference_and_output(dry_run: bool, model_weights_ok: bool, model_path
         print(f"[INFO] モデルロード完了 ({elapsed_load:.1f}s)。推論開始...", flush=True)
 
         # 推論 (greedy, 最大 512 トークン)
+        # do_sample=False のとき top_p/top_k/temperature は不要 (警告が出るため渡さない)
         with torch.no_grad():
             output_ids = model.generate(
                 **inputs,
                 max_new_tokens=512,
                 do_sample=False,
-                temperature=1.0,
                 pad_token_id=tokenizer.eos_token_id,
             )
 
