@@ -90,12 +90,18 @@ def main() -> int:
         default="claude-haiku-4-5-20251001",
         help="Claude model ID (used only when --solver-mode llm)",
     )
+    parser.add_argument(
+        "--effort",
+        default="low",
+        choices=["low", "medium", "high", "max"],
+        help="claude --effort level for cli mode (default: low)",
+    )
     args = parser.parse_args()
 
     # Resolve solver
     if args.solver_mode in (LLM, CLI):
         try:
-            solver_fn = create_solver(args.solver_mode, model=args.model)
+            solver_fn = create_solver(args.solver_mode, model=args.model, effort=args.effort)
         except SolverConfigError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
             return 1

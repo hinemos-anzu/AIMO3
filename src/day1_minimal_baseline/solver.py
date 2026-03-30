@@ -111,7 +111,10 @@ def _make_llm_solver(model: str = "claude-haiku-4-5-20251001") -> Callable[[dict
     return solve
 
 
-def _make_cli_solver(subprocess_timeout: float = 240.0) -> Callable[[dict[str, Any]], str]:
+def _make_cli_solver(
+    subprocess_timeout: float = 240.0,
+    effort: str = "low",
+) -> Callable[[dict[str, Any]], str]:
     """Return a solver that calls `claude --print` as a subprocess.
 
     Uses Claude Code subscription authentication — no ANTHROPIC_API_KEY required.
@@ -120,6 +123,8 @@ def _make_cli_solver(subprocess_timeout: float = 240.0) -> Callable[[dict[str, A
     Args:
         subprocess_timeout: seconds to wait for the subprocess before raising
                             subprocess.TimeoutExpired (default 240s).
+        effort: claude --effort level ("low", "medium", "high", "max").
+                Default "low" to avoid extended thinking timeouts.
 
     Raises:
         SolverConfigError: `claude` CLI not found in PATH.
@@ -143,7 +148,7 @@ def _make_cli_solver(subprocess_timeout: float = 240.0) -> Callable[[dict[str, A
             f"AIME answers are integers 0-999. Reply ONLY with the integer."
         )
         result = subprocess.run(
-            ["claude", "--print", "--output-format", "text"],
+            ["claude", "--print", "--output-format", "text", "--effort", effort],
             input=prompt,
             capture_output=True,
             text=True,
@@ -194,13 +199,17 @@ def _extract_integer(text: str) -> str:
 def create_solver(
     mode: str = PLACEHOLDER,
     model: str = "claude-haiku-4-5-20251001",
+    effort: str = "low",
 ) -> Callable[[dict[str, Any]], str]:
     """Create and return a solver callable for the given mode.
 
     Args:
-        mode:  "placeholder" (default), "llm", or "cli".
-        model: Claude model ID used when mode="llm".
-               Ignored in placeholder and cli modes.
+        mode:   "placeholder" (default), "llm", or "cli".
+        model:  Claude model ID used when mode="llm".
+                Ignored in placeholder and cli modes.
+        effort: effort level for cli mode ("low", "medium", "high", "max").
+                Default "low" to avoid extended thinking timeouts.
+                Ignored in placeholder and llm modes.
 
     Returns:
         A callable: (record: dict) -> str (raw answer, not yet normalised).
@@ -216,7 +225,7 @@ def create_solver(
     if mode == LLM:
         return _make_llm_solver(model=model)
     if mode == CLI:
-        return _make_cli_solver()
+        return _make_cli_solver(effort=effort)
     raise ValueError(
         f"Unknown solver mode: {mode!r}. "
         f"Valid modes: {VALID_MODES}"
