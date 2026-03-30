@@ -413,24 +413,47 @@ def run_batch_with_candidates(
 
     Raises:
         ValueError:       limit < 1 or invalid num_candidates / max_retries.
-        ExecTimeoutError: any problem exceeds timeout_sec.
+        ExecTimeoutError: any problem exceeds timeout_sec (pipeline-level timeout).
         MemoryError:      OOM on any problem (not retried).
-        RuntimeError:     any problem exhausts all retries.
+        RuntimeError:     no longer raised for individual problems; per-problem
+                          retry exhaustion (including subprocess timeouts) is
+                          caught and recorded as a failed result to allow the
+                          batch to complete.
     """
     if limit is not None and limit < 1:
         raise ValueError(f"limit must be >= 1, got {limit}")
 
     subset = records[:limit] if limit is not None else records
-    results = [
-        run_one_with_candidates(
-            r,
-            num_candidates=num_candidates,
-            max_retries=max_retries,
-            timeout_sec=timeout_sec,
-            solver=solver,
-        )
-        for r in subset
-    ]
+    results = []
+    for r in subset:
+        try:
+            results.append(run_one_with_candidates(
+                r,
+                num_candidates=num_candidates,
+                max_retries=max_retries,
+                timeout_sec=timeout_sec,
+                solver=solver,
+            ))
+        except RuntimeError as exc:
+            # Per-problem failure (all retries exhausted, subprocess timeout, etc.)
+            # Record explicitly as wrong — do NOT silently fallback or skip.
+            results.append({
+                "id": r["id"],
+                "domain": r.get("domain"),
+                "difficulty": r.get("difficulty"),
+                "predicted": None,
+                "expected": r.get("answer"),
+                "correct": False,
+                "retries_used": max_retries,
+                "exec_error_count": max_retries + 1,
+                "parse_failure_count": 0,
+                "elapsed_sec": round(timeout_sec, 6),
+                "exec_errors": [str(exc)],
+                "num_candidates_setting": num_candidates,
+                "candidate_diversity": 0.0,
+                "candidates": [],
+            })
+        # ExecTimeoutError and MemoryError still propagate (fatal for whole batch)
     total = len(results)
     correct = sum(1 for r in results if r["correct"])
     accuracy = correct / total if total > 0 else 0.0

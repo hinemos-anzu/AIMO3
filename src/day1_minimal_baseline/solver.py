@@ -112,7 +112,7 @@ def _make_llm_solver(model: str = "claude-haiku-4-5-20251001") -> Callable[[dict
 
 
 def _make_cli_solver(
-    subprocess_timeout: float = 240.0,
+    subprocess_timeout: float = 300.0,
     effort: str = "low",
 ) -> Callable[[dict[str, Any]], str]:
     """Return a solver that calls `claude --print` as a subprocess.
