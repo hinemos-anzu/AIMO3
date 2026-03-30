@@ -1,0 +1,44 @@
+=== Day5 Run3 batch baseline — summary ===
+  total              : 32
+  correct            : 0
+  accuracy           : 0.0000
+  5digit_compliance  : 3/32  (0.0938)
+
+  parse stats:
+    parse_success_count : 32
+    parse_failure_count : 0
+
+  candidate stats:
+    num_candidates_setting  : 1
+    avg_candidate_diversity : 0.093750
+
+  retry stats:
+    max_retries_setting : 0
+    timeout_sec_setting : 300.0
+    retry_count_used    : 0
+    exec_error_count    : 29
+    avg_runtime_sec     : 277.2853
+    max_runtime_sec     : 300.0000
+
+  domain breakdown:
+    algebra           total=  8  correct=  0  acc=0.0000
+    combinatorics     total=  8  correct=  0  acc=0.0000
+    geometry          total=  8  correct=  0  acc=0.0000
+    number_theory     total=  8  correct=  0  acc=0.0000
+
+  difficulty breakdown:
+    1                 total= 16  correct=  0  acc=0.0000
+    2                 total= 16  correct=  0  acc=0.0000
+
+id           domain         diff   pred   gold  ok?
+----------------------------------------------------------
+alg_001      algebra           1  00494  00031  --
+alg_002      algebra           1  00059  00063  --
+alg_003      algebra           1  00012  00057  --
+Traceback (most recent call last):
+  File "/home/user/AIMO3/scripts/run_baseline_batch.py", line 192, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/user/AIMO3/scripts/run_baseline_batch.py", line 184, in main
+    f"{r['id']:<12} {r['domain']:<14} {r['difficulty']:>4}  "
+TypeError: unsupported format string passed to NoneType.__format__
