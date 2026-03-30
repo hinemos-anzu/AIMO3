@@ -180,10 +180,17 @@ def main() -> int:
     print("-" * 58)
     for r in batch["results"]:
         ok = "OK" if r["correct"] else "--"
+        domain = r.get("domain") or "FAILED"
+        diff = str(r.get("difficulty")) if r.get("difficulty") is not None else "-"
+        pred = str(r.get("predicted")) if r.get("predicted") is not None else "ERROR"
+        gold = str(r.get("expected")) if r.get("expected") is not None else "?????"
         print(
-            f"{r['id']:<12} {r['domain']:<14} {r['difficulty']:>4}  "
-            f"{r['predicted']:>5}  {r['expected']:>5}  {ok}"
+            f"{r['id']:<12} {domain:<14} {diff:>4}  "
+            f"{pred:>5}  {gold:>5}  {ok}"
         )
+        if r.get("exec_errors"):
+            for err in r["exec_errors"]:
+                print(f"  EXEC_ERR: {str(err)[:120]}")
 
     return 0
 
