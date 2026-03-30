@@ -153,6 +153,7 @@ def _make_cli_solver(
             capture_output=True,
             text=True,
             timeout=subprocess_timeout,
+            cwd="/tmp",  # neutral cwd: avoids stop-hook git checks on project repo
         )
         if result.returncode != 0:
             raise RuntimeError(
