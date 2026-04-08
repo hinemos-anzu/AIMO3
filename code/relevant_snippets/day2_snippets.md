@@ -1,33 +1,54 @@
 # Day2 Relevant Code Snippets
 
-Paste the review-relevant code here.
+Updated snippets for the v2 selector/verifier patch are in `code/aimo3_solver_v2_patch.py`.
 
-## Required sections
-### `predict()`
+## `select_answer_v2()` (replaces `_select_answer` behavior)
 ```python
-# paste here
+# true soft ranking: evaluate ALL candidates, no early break
+for cand in scored:
+    ans = cand["answer"]
+    verifier: VerifierResult = verify_fn(problem_text, ans)
+    scc = small_case_consistency_score(problem_text, ans)
+    verifier_bonus = verdict_bonus_map.get(verifier.verdict, 0.0)
+
+    composite = (
+        cand["base_score"]
+        + verifier_bonus
+        + majority_bonus * int(ans == majority_answer)
+        + scc
+    )
+    ...
+
+# final decision only after all candidates are scored
+for row in candidate_scores:
+    row.selected_flag = int(row.answer == best_answer)
 ```
 
-### `_process_attempt`
+## Verifier tri-state + quality checks
 ```python
-# paste here
+quality = evaluate_verifier_quality(problem, candidate_ans, verifier_code)
+verdict = classify_verifier_result(tool_output, quality, contradiction_found)
+# verdict in {"VALID", "INVALID", "UNVERIFIED"}
 ```
 
-### `_select_answer`
+## Attempts-aware timeout rebalance
 ```python
-# paste here
+def allocate_problem_budget(..., attempts: int, baseline_attempts: int = 10) -> float:
+    raw_budget = ...
+    per_attempt = raw_budget / max(1, baseline_attempts)
+    scaled = per_attempt * max(1, attempts)
+    return min(high_problem_timeout, max(base_problem_timeout, scaled))
 ```
 
-### `inference_server.serve()` or related server path
+## Expanded logs
 ```python
-# paste here
-```
-
-### Exception handling / fallback-like branches / logging points
-```python
-# paste here
+# candidate-level
+logs/ranker_eval/per_problem_candidate_scores.jsonl
+# attempt-level
+logs/style_eval/per_attempt_style.csv
 ```
 
 ## Notes
-- Keep snippets minimal but sufficient for audit.
-- Include surrounding logic for fail-fast and fallback decisions.
+- `majority_bonus` is disabled by default (`0.0`) to reduce herd-error amplification.
+- Verifier influence is additive (`VALID +0.40 / UNVERIFIED +0.10 / INVALID -0.20`).
+- `small_case_consistency_score` is a framework hook (currently neutral `0.0`).
