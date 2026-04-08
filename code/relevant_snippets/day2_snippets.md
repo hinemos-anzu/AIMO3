@@ -1,54 +1,22 @@
 # Day2 Relevant Code Snippets
 
-Updated snippets for the v2 selector/verifier patch are in `code/aimo3_solver_v2_patch.py`.
+実行可能な統合版は `code/kaggle_aimo3_v2_runner.py` に実装。
 
-## `select_answer_v2()` (replaces `_select_answer` behavior)
-```python
-# true soft ranking: evaluate ALL candidates, no early break
-for cand in scored:
-    ans = cand["answer"]
-    verifier: VerifierResult = verify_fn(problem_text, ans)
-    scc = small_case_consistency_score(problem_text, ans)
-    verifier_bonus = verdict_bonus_map.get(verifier.verdict, 0.0)
+## `predict()`
+- `run_kaggle_inference()` 内で `predict()` を定義し、`AIMO3InferenceServer` に渡しています。
 
-    composite = (
-        cand["base_score"]
-        + verifier_bonus
-        + majority_bonus * int(ans == majority_answer)
-        + scc
-    )
-    ...
+## `_process_attempt`
+- `AIMO3Solver._process_attempt()` で style/tir/python使用有無・python_error・entropy を収集。
 
-# final decision only after all candidates are scored
-for row in candidate_scores:
-    row.selected_flag = int(row.answer == best_answer)
-```
+## `_select_answer`
+- `AIMO3Solver._select_answer()` は全候補に対して verifier を実行し、加点型 `composite_score` で最終選択。
+- early `break` はありません。
 
-## Verifier tri-state + quality checks
-```python
-quality = evaluate_verifier_quality(problem, candidate_ans, verifier_code)
-verdict = classify_verifier_result(tool_output, quality, contradiction_found)
-# verdict in {"VALID", "INVALID", "UNVERIFIED"}
-```
+## `inference_server.serve()` path
+- `if os.getenv('KAGGLE_IS_COMPETITION_RERUN'):` で `serve()`、それ以外は `run_local_gateway()` を実行。
 
-## Attempts-aware timeout rebalance
-```python
-def allocate_problem_budget(..., attempts: int, baseline_attempts: int = 10) -> float:
-    raw_budget = ...
-    per_attempt = raw_budget / max(1, baseline_attempts)
-    scaled = per_attempt * max(1, attempts)
-    return min(high_problem_timeout, max(base_problem_timeout, scaled))
-```
-
-## Expanded logs
-```python
-# candidate-level
-logs/ranker_eval/per_problem_candidate_scores.jsonl
-# attempt-level
-logs/style_eval/per_attempt_style.csv
-```
-
-## Notes
-- `majority_bonus` is disabled by default (`0.0`) to reduce herd-error amplification.
-- Verifier influence is additive (`VALID +0.40 / UNVERIFIED +0.10 / INVALID -0.20`).
-- `small_case_consistency_score` is a framework hook (currently neutral `0.0`).
+## Exception handling / fallback / logging
+- Verifier は `VALID / INVALID / UNVERIFIED` 三値。
+- `logs/recall_eval/recall_summary.jsonl`
+- `logs/ranker_eval/per_problem_candidate_scores.jsonl`
+- `logs/style_eval/per_attempt_style.csv`
